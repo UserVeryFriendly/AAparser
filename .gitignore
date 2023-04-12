@@ -53,3 +53,6 @@ venv.bak/
 
 # logs
 bot.log
+
+# other
+.png
