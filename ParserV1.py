@@ -1,14 +1,22 @@
 import telegram
 import time
 import os
+import logging
 from dotenv import load_dotenv
 from telegram import KeyboardButton, ReplyKeyboardMarkup
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
 from bs4 import BeautifulSoup
 from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
 
 load_dotenv()
+logging.basicConfig(
+    filename='bot.log',
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
+send_counter = 0
 
 slug = {
     'Ария': 33,
@@ -58,9 +66,11 @@ def button(update, context):
 
 
 def get_html_content(url, update, context):
-    driver = webdriver.Chrome()
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    driver = webdriver.Chrome(chrome_options=chrome_options)
     driver.get(url)
-    time.sleep(5)
+    time.sleep(1)
     html = driver.page_source
     driver.close()
     extract_numbers(html, update, context)
@@ -85,58 +95,66 @@ def extract_numbers(html, update, context):
 
 
 def generate_table(numbers, update, context):
+    global send_counter
+    current_time = time.time()
+    formatted_time = time.strftime(
+        '%d.%m.%Y %H:%M:%S',
+        time.localtime(current_time)
+    )
+
     if len(numbers) != 29:
         raise ValueError("Количество чисел должно быть 29")
 
     table = f"""
+{formatted_time}
     ~~~Запад~~~
 
     Кожа:
-Кладбище {numbers[0]:<10}
-Нагорье {numbers[1]:<10}
-Коса {numbers[2]:<10}
-ДЦП {numbers[3]:<10}
+Кладбище {numbers[0]}
+Нагорье {numbers[1]}
+Коса {numbers[2]}
+ДЦП {numbers[3]}
 
     Ткань:
-Мэрианхольд {numbers[4]:<10}
-Лилиот {numbers[5]:<10}
-Две короны {numbers[6]:<10}
-Золотые равнины {numbers[7]:<10}
+Мэрианхольд {numbers[4]}
+Лилиот {numbers[5]}
+Две короны {numbers[6]}
+Золотые равнины {numbers[7]}
 
     Слиток железа:
-Згк {numbers[8]:<10}
-Морозная гряда {numbers[9]:<10}
-Ппз {numbers[10]:<10}
+Згк {numbers[8]}
+Морозная гряда {numbers[9]}
+Ппз {numbers[10]}
 
     Строительная древесина:
-Гвинедар {numbers[11]:<10}
-Солрид {numbers[12]:<10}
-Белый лес {numbers[13]:<10}
-Заболоты {numbers[14]:<10}
+Гвинедар {numbers[11]}
+Солрид {numbers[12]}
+Белый лес {numbers[13]}
+Заболоты {numbers[14]}
 
     ~~~Восток~~~
 
     Кожа:
-Махадеби {numbers[15]:<10}
-Поющая земля {numbers[16]:<10}
-Саванна {numbers[17]:<10}
-Рокочка {numbers[18]:<10}
+Махадеби {numbers[15]}
+Поющая земля {numbers[16]}
+Саванна {numbers[17]}
+Рокочка {numbers[18]}
 
     Ткань:
-Радужные пески {numbers[19]:<10}
-Псо {numbers[20]:<10}
+Радужные пески {numbers[19]}
+Псо {numbers[20]}
 
     Слиток железа:
-Полуостров Рассвета {numbers[21]:<10}
-Багровый каньон {numbers[22]:<10}
-Тигриный хребет {numbers[23]:<10}
-Долина талых снегов {numbers[24]:<10}
+Полуостров Рассвета {numbers[21]}
+Багровый каньон {numbers[22]}
+Тигриный хребет {numbers[23]}
+Долина талых снегов {numbers[24]}
 
     Строительная древесина:
-Руины харихаралы {numbers[25]:<10}
-Инистра {numbers[26]:<10}
-Хазира {numbers[27]:<10}
-Древний лес {numbers[28]:<10}
+Руины харихаралы {numbers[25]}
+Инистра {numbers[26]}
+Хазира {numbers[27]}
+Древний лес {numbers[28]}
 
 С любовью, Хэбпс!(@Snitch151)
 """
@@ -144,6 +162,9 @@ def generate_table(numbers, update, context):
         chat_id=update.effective_chat.id,
         text=table
     )
+    send_counter += 1
+    logging.info(f"Send: {update.effective_user.first_name} {update.effective_user.last_name}, ID: {update.effective_user.id}")
+    logger.info(f'Send: {send_counter}')
 
 
 updater = Updater(

@@ -50,3 +50,6 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+
+# logs
+bot.log
