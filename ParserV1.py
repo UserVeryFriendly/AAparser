@@ -1,13 +1,16 @@
-import telegram
 import time
 import os
 import logging
+from typing import List
 from dotenv import load_dotenv
-from telegram import KeyboardButton, ReplyKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
+from telegram import KeyboardButton, ReplyKeyboardMarkup, Update
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 load_dotenv()
 logging.basicConfig(
@@ -18,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 send_counter = 0
 
-slug = {
+SLUG = {
     'Ария': 33,
     'Ифнир': 49,
     'Каиль': 43,
@@ -33,14 +36,12 @@ slug = {
 }
 
 
-def start(update, context):
+def start(update: Update, context: CallbackContext) -> None:
     buttons = []
-    for server_name in slug:
-        button = KeyboardButton(
-            text=server_name
-        )
+    for server_name in SLUG:
+        button = KeyboardButton(text=server_name)
         buttons.append([button])
-    keyboard = ReplyKeyboardMarkup(buttons, one_time_keyboard=False)
+    keyboard = ReplyKeyboardMarkup(buttons, one_time_keyboard=False, resize_keyboard=True)
     context.bot.send_message(
         chat_id=update.effective_chat.id,
         text='''
@@ -52,9 +53,9 @@ def start(update, context):
     )
 
 
-def button(update, context):
+def button(update: Update, context: CallbackContext) -> None:
     server_name = update.message.text
-    server_id = slug.get(server_name)
+    server_id = SLUG.get(server_name)
     if server_id:
         url = f'https://gisaa.ru/veksel/{server_id}'
         get_html_content(url, update, context)
@@ -65,23 +66,40 @@ def button(update, context):
         )
 
 
-def get_html_content(url, update, context):
+def get_html_content(url: str, update: Update, context: CallbackContext) -> None:
     chrome_options = Options()
     chrome_options.add_argument("--headless")
-    driver = webdriver.Chrome(chrome_options=chrome_options)
-    driver.get(url)
-    time.sleep(1)
-    html = driver.page_source
-    driver.close()
-    extract_numbers(html, update, context)
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-gpu")
+    driver = webdriver.Chrome(options=chrome_options)
+    try:
+        driver.get(url)
+        # Ждем появления нужных элементов вместо sleep
+        WebDriverWait(driver, 15).until(
+            EC.presence_of_all_elements_located((By.CSS_SELECTOR, 'td.row__cell-max'))
+        )
+        html = driver.page_source
+        extract_numbers(html, update, context)
+    except Exception as exc:
+        logger.exception("Ошибка при загрузке страницы: %s", exc)
+        context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text='Не удалось загрузить данные. Попробуйте позже.'
+        )
+    finally:
+        try:
+            driver.quit()
+        except Exception:
+            pass
 
 
-def extract_numbers(html, update, context):
+def extract_numbers(html: str, update: Update, context: CallbackContext) -> None:
     html_content = BeautifulSoup(html, 'html.parser')
     td_values = html_content.find_all('td', class_='row__cell-max')
     td_values = td_values[:29]
     if td_values:
-        numbers = []
+        numbers: List[int | str] = []
         for td in td_values:
             text = td.get_text(strip=True)
             if text.isdigit():
@@ -91,10 +109,13 @@ def extract_numbers(html, update, context):
                 numbers.append(text)
         generate_table(numbers, update, context)
     else:
-        raise ValueError("Значения не были найдены.")
+        context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text='Значения не были найдены.'
+        )
 
 
-def generate_table(numbers, update, context):
+def generate_table(numbers: List[int | str], update: Update, context: CallbackContext) -> None:
     global send_counter
     current_time = time.time()
     formatted_time = time.strftime(
@@ -103,7 +124,12 @@ def generate_table(numbers, update, context):
     )
 
     if len(numbers) != 29:
-        raise ValueError("Количество чисел должно быть 29")
+        context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text='Ошибка: количество значений отличается от ожидаемого.'
+        )
+        logger.warning("Ожидалось 29 значений, получено: %s", len(numbers))
+        return
 
     table = f"""
 {formatted_time}
@@ -167,12 +193,23 @@ def generate_table(numbers, update, context):
     logger.info(f'Send: {send_counter}')
 
 
-updater = Updater(
-    token=os.environ.get('SECRET_BOT_TOKEN'),
-    use_context=True
-)
-updater.dispatcher.add_handler(CommandHandler('start', start))
-updater.dispatcher.add_handler(MessageHandler(Filters.text, button))
+def main() -> None:
+    token = os.environ.get('SECRET_BOT_TOKEN')
+    if not token:
+        logger.error('SECRET_BOT_TOKEN is not set in environment variables')
+        raise RuntimeError('SECRET_BOT_TOKEN is not set')
 
-updater.start_polling()
-updater.idle()
+    updater = Updater(
+        token=token,
+        use_context=True
+    )
+    dispatcher = updater.dispatcher
+    dispatcher.add_handler(CommandHandler('start', start))
+    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, button))
+
+    updater.start_polling()
+    updater.idle()
+
+
+if __name__ == '__main__':
+    main()
